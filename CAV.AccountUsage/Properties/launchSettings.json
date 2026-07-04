@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "Mock Lambda Test Tool": {
+      "commandName": "Executable",
+      "executablePath": "dotnet",
+      "commandLineArgs": "lambda-test-tool-10.0 --port 5050",
+      "workingDirectory": "$(ProjectDir)",
+      "environmentVariables": {
+        "AWS_REGION": "eu-west-2",
+        "AWS_PROFILE": "default"
+      }
+    }
+  }
+}
