@@ -1,12 +1,57 @@
-# AWS Lambda Empty Function Project
+# CAV Account Usage Security Automation Lambda Function
 
-This starter project consists of:
-* Function.cs - class file containing a class with a single function handler method
-* aws-lambda-tools-defaults.json - default argument settings for use with Visual Studio and command line deployment tools for AWS
+An AWS Lambda function (.NET 10 / C#) that audits IAM account usage and automatically
+remediates stale credentials. It is intended to be invoked on a schedule via an Amazon
+EventBridge event.
 
-You may also have a test project depending on the options selected.
+## What the function does
 
-The generated function handler is a simple method accepting a string argument that returns the uppercase equivalent of the input string. Replace the body of this method, and parameters, to suit your needs. 
+When invoked, `Function.FunctionHandler` performs the following steps:
+
+1. Lists all IAM users in the account (`ListUsersAsync`).
+2. Requests a fresh IAM credential report (`GenerateCredentialReportAsync`) and polls until
+   it is ready, regenerating it if AWS reports it as expired.
+3. Parses the returned credential report CSV into `UserReportLineItem` records using CsvHelper.
+4. Disables **inactive console users** — IAM users whose console password is enabled but who
+   have not signed in within the last 90 days (including users who have never signed in). Each
+   matching user has a deny-all inline policy (`DisableUserPolicy`) attached.
+5. Deactivates **stale access keys** — active access keys belonging to IAM users that have not
+   been used within the last 90 days (including keys that have never been used) are set to
+   `Inactive`.
+6. Publishes Amazon SNS notifications summarising the users that were disabled and the access
+   keys that were deactivated.
+
+The 90-day threshold is currently hard-coded in `Function.ProcessReportAsync`.
+
+## Project layout
+
+* `Function.cs` - Lambda entry point; orchestrates report generation, parsing, and the
+  disable/deactivate remediation actions, plus SNS notifications.
+* `Filtering/CredentialReportFilters.cs` - pure, unit-tested filtering logic
+  (`GetInactiveConsoleUsers`, `GetUsersWithStaleAccessKeys`, and the `TryParseAwsDate` helper
+  that handles AWS sentinel values such as `N/A`, `no_information`, and `not_supported`).
+* `Models/UserReportLineItem.cs` - strongly typed representation of a row in the IAM
+  credential report CSV.
+* `Models/EventBridgeEvent.cs` - envelope model for the EventBridge event that triggers the
+  function.
+* `aws-lambda-tools-defaults.json` - default argument settings for Visual Studio and the AWS
+  command line deployment tools.
+
+The function is deployed with the settings in `aws-lambda-tools-defaults.json`: region
+`eu-west-2`, runtime `dotnet10`, `x86_64` architecture, 512 MB memory, a 30 second timeout,
+and the handler `CAV.AccountUsage::CAV.AccountUsage.Function::FunctionHandler`.
+
+## Required AWS permissions
+
+The function's execution role needs IAM permissions to read users and the credential report
+and to perform remediation: `iam:ListUsers`, `iam:GenerateCredentialReport`,
+`iam:GetCredentialReport`, `iam:PutUserPolicy`, `iam:ListAccessKeys`, `iam:UpdateAccessKey`,
+and `sns:Publish` for the target topic.
+
+## Tests
+
+Unit tests for the filtering logic live in the `CAV.AccountUsage.Tests` project (xUnit) in
+`CredentialReportFiltersTests.cs`.
 
 ## Here are some steps to follow from Visual Studio:
 
@@ -38,12 +83,12 @@ If already installed check if new version is available.
 
 Execute unit tests
 ```
-    cd "CAV.AccountUsage/test/CAV.AccountUsage.Tests"
+    cd "CAV.AccountUsage.Tests"
     dotnet test
 ```
 
 Deploy function to AWS Lambda
 ```
-    cd "CAV.AccountUsage/src/CAV.AccountUsage"
+    cd "CAV.AccountUsage"
     dotnet lambda deploy-function
 ```

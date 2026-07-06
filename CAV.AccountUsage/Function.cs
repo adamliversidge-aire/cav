@@ -12,9 +12,12 @@ using CsvHelper;
 
 namespace CAV.AccountUsage;
 
-public class Function(IAmazonIdentityManagementService iamClient, IAmazonSimpleNotificationService simpleNotificationService)
+public class Function(IAmazonIdentityManagementService iamClient, 
+    IAmazonSimpleNotificationService simpleNotificationService)
 {
-    public Function() : this(new AmazonIdentityManagementServiceClient(), new AmazonSimpleNotificationServiceClient()) { }
+    public Function() 
+        : this(new AmazonIdentityManagementServiceClient(),
+            new AmazonSimpleNotificationServiceClient()) { }
 
     public async Task FunctionHandler(EventBridgeEvent<dynamic> input, ILambdaContext context)
     {
@@ -72,25 +75,22 @@ public class Function(IAmazonIdentityManagementService iamClient, IAmazonSimpleN
         //todo: Get users that are about to expire, sub 7 days, need to check password / access_key_1 and access_key_2
 
         var iamUserNames = users.Users.Select(x => x.UserName).ToList();
-        var cutoff = DateTime.UtcNow.AddDays(-90);
-
+        var cutOffDate = DateTime.UtcNow.AddDays(-90);
+        
         //Action Disable user?
         var inactiveConsoleUsers =
-            CredentialReportFilters.GetInactiveConsoleUsers(reportLineItems, iamUserNames, cutoff);
+            CredentialReportFilters.GetInactiveConsoleUsers(reportLineItems, iamUserNames, cutOffDate);
         
         await DisableInactiveUsers(inactiveConsoleUsers);
 
         //Action - removeKey?
-        //Aggregate users that have had keys deleted - send to Admins (SNS)
-        var inactiveAccessKeys = CredentialReportFilters.GetUsersWithStaleAccessKeys(reportLineItems, iamUserNames, cutoff);
-        
-        await RemoveExpiredAccessKeys(inactiveConsoleUsers);
-
+        var inactiveAccessKeys = CredentialReportFilters.GetUsersWithStaleAccessKeys(reportLineItems, iamUserNames, cutOffDate);
+        await RemoveExpiredAccessKeys(inactiveAccessKeys);
     }
 
     private async Task DisableInactiveUsers(IReadOnlyCollection<UserReportLineItem> inactiveUsers)
     {
-        List<string> disbaledUsers = [];
+        List<string> disabledUsers = [];
         foreach (var user in inactiveUsers)
         {
             await iamClient.PutUserPolicyAsync(new PutUserPolicyRequest
@@ -110,13 +110,13 @@ public class Function(IAmazonIdentityManagementService iamClient, IAmazonSimpleN
                                  }
                                  """
             });
-            disbaledUsers.Add(user.User);
+            disabledUsers.Add(user.User);
         }
         
         await simpleNotificationService.PublishAsync(new Amazon.SimpleNotificationService.Model.PublishRequest
         {
             TopicArn = "arn:aws:sns:us-east-1:123456789012:YourTopicName",
-            Message = $"The following users have been disabled due to inactivity:\n{string.Join("\n", disbaledUsers)}"
+            Message = $"The following users have been disabled due to inactivity:\n{string.Join("\n", disabledUsers)}"
         });
         
         //TODO: Do we ant to DTQ this on failure?
@@ -124,40 +124,56 @@ public class Function(IAmazonIdentityManagementService iamClient, IAmazonSimpleN
     
     private async Task RemoveExpiredAccessKeys(IReadOnlyCollection<UserReportLineItem> expiredAccessKeys)
     {
-        List<string> removedKeys = [];
+        List<string> usersWithKeysRemoved = [];
         foreach (var user in expiredAccessKeys)
         {
-            if (user.AccessKey1Active)
-            {
-                await iamClient.UpdateAccessKeyAsync(new UpdateAccessKeyRequest
-                {
-                    UserName = user.User,
-                    AccessKeyId = user.AccessKey1LastUsedService, // Assuming this is the Access Key ID
-                    Status = StatusType.Inactive
-                });
-                removedKeys.Add($"{user.User} - Access Key 1");
-            }
-
-            if (!user.AccessKey2Active)
-            {
-                continue;
-            };
+            var _user = await CheckUserKeysAsync(user);
             
-            await iamClient.UpdateAccessKeyAsync(new UpdateAccessKeyRequest
+            if(!string.IsNullOrWhiteSpace(_user))
             {
-                UserName = user.User,
-                AccessKeyId = user.AccessKey2LastUsedService, // Assuming this is the Access Key ID
-                Status = StatusType.Inactive
-            });
-            removedKeys.Add($"{user.User} - Access Key 2");
+                usersWithKeysRemoved.Add(_user);
+            }
         }
         
-        await simpleNotificationService.PublishAsync(new Amazon.SimpleNotificationService.Model.PublishRequest
+        if (usersWithKeysRemoved.Count > 0)
         {
-            TopicArn = "arn:aws:sns:us-east-1:123456789012:YourTopicName",
-            Message = $"The following access keys have been disabled due to inactivity:\n{string.Join("\n", removedKeys)}"
-        });
-        
-        //TODO: Do we ant to DTQ this on failure?
+            await simpleNotificationService.PublishAsync(new Amazon.SimpleNotificationService.Model.PublishRequest
+            {
+                TopicArn = "arn:aws:sns:us-east-1:123456789012:YourTopicName",
+                Message = $"The following access keys have been disabled due to inactivity:\n{string.Join("\n", usersWithKeysRemoved)}"
+            });  
+        }
     }
+
+    private async Task<string?> CheckUserKeysAsync(UserReportLineItem user)
+    {
+        var keys = await iamClient.ListAccessKeysAsync(new ListAccessKeysRequest
+        {
+            UserName = user.User
+        });
+            
+        if (user.AccessKey1Active)
+        {
+            await RemoveKey(user.User!, keys.AccessKeyMetadata[0].AccessKeyId); //not null here
+            
+            return user.User;
+        }
+        
+        if (!user.AccessKey2Active)
+        {
+            return null;
+        };
+            
+        await RemoveKey(user.User!, keys.AccessKeyMetadata[1].AccessKeyId); //not null here
+        
+        return user.User;
+    }
+    
+    private async Task RemoveKey(string user, string keyId) => 
+        await iamClient.UpdateAccessKeyAsync(new UpdateAccessKeyRequest
+    {
+        UserName = user,
+        AccessKeyId = keyId,
+        Status = StatusType.Inactive
+    });
 }

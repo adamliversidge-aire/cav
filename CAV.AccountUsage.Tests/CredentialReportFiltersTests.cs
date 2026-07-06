@@ -33,7 +33,7 @@ public class CredentialReportFiltersTests
     [Fact]
     public void ActiveUser_LoggedInRecently_IsExcluded()
     {
-        var report = new[] { MakeUser("alice", passwordLastUsed: "2024-12-31T00:00:00Z") };
+        var report = new[] { MakeUser("alice", passwordLastUsed: "2025-06-01T00:00:00Z") };
 
         var result = CredentialReportFilters.GetInactiveConsoleUsers(report, IamNames("alice"), Cutoff);
 
@@ -138,7 +138,7 @@ public class CredentialReportFiltersTests
         var report = new[]
         {
             MakeUser("inactive",    passwordEnabled: "true",  passwordLastUsed: "2024-06-01T00:00:00Z"), // included
-            MakeUser("recent",      passwordEnabled: "true",  passwordLastUsed: "2024-12-31T00:00:00Z"), // excluded – logged in recently
+            MakeUser("recent",      passwordEnabled: "true",  passwordLastUsed: "2025-06-01T00:00:00Z"), // excluded – logged in recently
             MakeUser("disabled",    passwordEnabled: "false", passwordLastUsed: "2024-06-01T00:00:00Z"), // excluded – no console access
             MakeUser("never",       passwordEnabled: "true",  passwordLastUsed: "N/A"),                  // included – never logged in
             MakeUser("notInIam",    passwordEnabled: "true",  passwordLastUsed: "2024-06-01T00:00:00Z"), // excluded – not in IAM list
