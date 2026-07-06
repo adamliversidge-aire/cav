@@ -154,7 +154,7 @@ public class Function(IAmazonIdentityManagementService iamClient,
             
         if (user.AccessKey1Active)
         {
-            await RemoveKey(user.User!, keys.AccessKeyMetadata[0].AccessKeyId); //not null here
+            await SetKeyAsInactive(user.User!, keys.AccessKeyMetadata[0].AccessKeyId); //not null here
             
             return user.User;
         }
@@ -164,12 +164,12 @@ public class Function(IAmazonIdentityManagementService iamClient,
             return null;
         };
             
-        await RemoveKey(user.User!, keys.AccessKeyMetadata[1].AccessKeyId); //not null here
+        await SetKeyAsInactive(user.User!, keys.AccessKeyMetadata[1].AccessKeyId); //not null here
         
         return user.User;
     }
     
-    private async Task RemoveKey(string user, string keyId) => 
+    private async Task SetKeyAsInactive(string user, string keyId) => 
         await iamClient.UpdateAccessKeyAsync(new UpdateAccessKeyRequest
     {
         UserName = user,
