@@ -1,5 +1,6 @@
 ﻿using Amazon.Billing;
 using Amazon.Lambda.Annotations;
+using Amazon.Organizations;
 using Amazon.RAM;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,5 +13,6 @@ internal static class Startup
     {
         services.AddSingleton<IAmazonBilling, AmazonBillingClient>();
         services.AddSingleton<IAmazonRAM, AmazonRAMClient>();
+        services.AddSingleton<IAmazonOrganizations, AmazonOrganizationsClient>();
     }
 }

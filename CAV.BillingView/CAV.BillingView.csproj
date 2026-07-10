@@ -20,6 +20,7 @@
         <PackageReference Include="AWSSDK.CloudWatch" Version="4.0.101.2" />
         <PackageReference Include="AWSSDK.CloudWatchEvents" Version="4.0.100.2" />
         <PackageReference Include="AWSSDK.ControlTower" Version="4.0.100.2" />
+        <PackageReference Include="AWSSDK.Organizations" Version="4.0.100.3" />
         <PackageReference Include="AWSSDK.RAM" Version="4.0.100.2" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0-preview.4.26230.115" />
     </ItemGroup>
