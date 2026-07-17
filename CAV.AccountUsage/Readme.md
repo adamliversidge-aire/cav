@@ -53,6 +53,47 @@ and `sns:Publish` for the target topic.
 Unit tests for the filtering logic live in the `CAV.AccountUsage.Tests` project (xUnit) in
 `CredentialReportFiltersTests.cs`.
 
+## CI/CD pipeline and infrastructure
+
+Everything needed to build, test, and deploy the function lives under `Infrastructure/`:
+
+* `pipeline.yaml` - AWS CodePipeline definition with four stages:
+  1. **Source** - pulls the repo via a CodeStar GitHub connection (`master` branch).
+  2. **BuildAndTest** - runs `buildspec-build-test.yml` (CodeBuild project `dotnet-lambda-build-test`).
+  3. **TerraformCheck** - runs `buildspec-terraform-plan.yml` (CodeBuild project `dotnet-lambda-terraform-plan`)
+     and exposes whether changes are pending via the `TerraformPlanVars.TF_CHANGES_PENDING` pipeline variable.
+  4. **DeployInfra** - runs `buildspec-terraform-apply.yml` (CodeBuild project `dotnet-lambda-terraform-apply`),
+     skipped unless `TF_CHANGES_PENDING` is `true`.
+* `pipeline-policy.json` - IAM policy for the pipeline/CodeBuild service role: CloudWatch Logs, the
+  pipeline artifact bucket, the Terraform state bucket/lock table, and Lambda + Lambda execution role
+  management, all scoped to `eu-west-2`.
+* `buildspec-build-test.yml` - restores, lint-checks (`dotnet format --verify-no-changes`), builds,
+  unit-tests, and packages the function with `dotnet lambda package` into `publish/function.zip`.
+* `buildspec-terraform-plan.yml` - before running Terraform, checks (via `aws s3api head-bucket` /
+  `aws dynamodb describe-table`) whether the remote state bucket and lock table already exist and, if
+  not, bootstraps them from `Infrastructure/bootstrap`. It then runs `terraform plan` in
+  `Infrastructure/` and exports `TF_CHANGES_PENDING`.
+* `buildspec-terraform-apply.yml` - runs `terraform apply` against the saved plan.
+
+### Terraform layout
+
+* `Infrastructure/main.tf` - the `aws` provider and the S3 `backend` block used for the function's
+  remote state (bucket/key/region/lock table are placeholders — see below).
+* `Infrastructure/lambda.tf` - the actual deployment: the Lambda execution IAM role/policy, the
+  function itself (sourced from `../../publish/function.zip`, matching `aws-lambda-tools-defaults.json`),
+  its CloudWatch log group, and an EventBridge schedule rule (`rate(1 day)` by default) that triggers it.
+* `Infrastructure/bootstrap/main.tf` - a separate, local-state-only config that creates the Terraform
+  state S3 bucket and DynamoDB lock table. It's isolated from `main.tf` deliberately, since a backend
+  can't be initialized against a bucket that doesn't exist yet; `buildspec-terraform-plan.yml` applies it
+  automatically the first time it detects the bucket/table are missing.
+
+### Placeholders to fill in before deploying
+
+`pipeline.yaml`, `pipeline-policy.json`, and the Terraform files use placeholder values that need real
+AWS resource identifiers before the pipeline can run: `ACCOUNT_ID` and `CONNECTION_ID` (CodeStar
+connection), `YOUR_TF_STATE_BUCKET` / `YOUR_TF_LOCK_TABLE` (Terraform backend), and `YOUR_SNS_TOPIC_ARN`
+(remediation notifications).
+
 ## Here are some steps to follow from Visual Studio:
 
 To deploy your function to AWS Lambda, right click the project in Solution Explorer and select *Publish to AWS Lambda*.

@@ -1,0 +1,90 @@
+version: 0.2
+
+env:
+  variables:
+    TF_WORKING_DIR: "CAV.AccountUsage/Infrastructure"
+    TF_VERSION: "1.9.0"
+    AWS_REGION: "eu-west-2"
+    TF_STATE_BUCKET: "YOUR_TF_STATE_BUCKET"
+    TF_LOCK_TABLE: "YOUR_TF_LOCK_TABLE"
+  exported-variables:
+    - TF_CHANGES_PENDING
+
+phases:
+  install:
+    commands:
+      - echo "Installing Terraform $TF_VERSION..."
+      - curl -sLo terraform.zip "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+      - unzip -o terraform.zip -d /usr/local/bin
+      - terraform -version
+
+  pre_build:
+    commands:
+      - echo "Checking Terraform state backend prerequisites..."
+      - |
+        set -e
+        BUCKET_EXISTS=false
+        TABLE_EXISTS=false
+
+        if aws s3api head-bucket --bucket "$TF_STATE_BUCKET" --region "$AWS_REGION" 2>/dev/null; then
+          echo "State bucket $TF_STATE_BUCKET already exists."
+          BUCKET_EXISTS=true
+        else
+          echo "State bucket $TF_STATE_BUCKET not found."
+        fi
+
+        if aws dynamodb describe-table --table-name "$TF_LOCK_TABLE" --region "$AWS_REGION" >/dev/null 2>&1; then
+          echo "Lock table $TF_LOCK_TABLE already exists."
+          TABLE_EXISTS=true
+        else
+          echo "Lock table $TF_LOCK_TABLE not found."
+        fi
+
+        if [ "$BUCKET_EXISTS" = false ] || [ "$TABLE_EXISTS" = false ]; then
+          echo "Bootstrapping missing Terraform state resources..."
+          (
+            cd "$TF_WORKING_DIR/bootstrap"
+            terraform init -input=false
+            terraform apply -input=false -auto-approve \
+              -var "region=$AWS_REGION" \
+              -var "state_bucket_name=$TF_STATE_BUCKET" \
+              -var "lock_table_name=$TF_LOCK_TABLE"
+          )
+        else
+          echo "State bucket and lock table already exist — skipping bootstrap."
+        fi
+
+  build:
+    commands:
+      - cd $TF_WORKING_DIR
+      - echo "Initializing Terraform..."
+      - terraform init -input=false
+
+      - echo "Running plan with detailed exit code..."
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes present
+      - |
+        set +e
+        terraform plan -input=false -out=tfplan -detailed-exitcode
+        PLAN_EXIT_CODE=$?
+        set -e
+
+        if [ $PLAN_EXIT_CODE -eq 1 ]; then
+          echo "Terraform plan failed."
+          exit 1
+        elif [ $PLAN_EXIT_CODE -eq 2 ]; then
+          echo "Changes detected — deploy stage will run."
+          export TF_CHANGES_PENDING=true
+        else
+          echo "No changes detected — deploy stage will be skipped."
+          export TF_CHANGES_PENDING=false
+        fi
+
+  post_build:
+    commands:
+      - echo "TF_CHANGES_PENDING=$TF_CHANGES_PENDING"
+
+artifacts:
+  files:
+    - CAV.AccountUsage/Infrastructure/tfplan
+    - CAV.AccountUsage/Infrastructure/**/*
+  base-directory: $CODEBUILD_SRC_DIR

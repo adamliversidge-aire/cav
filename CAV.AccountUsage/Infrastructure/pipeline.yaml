@@ -1,0 +1,97 @@
+pipeline:
+  name: dotnet-lambda-pipeline
+  roleArn: >-
+    arn:aws:iam::ACCOUNT_ID:role/service-role/AWSCodePipelineServiceRole-eu-west-2-dotnet-lambda-pipeline
+  artifactStore:
+    type: S3
+    location: amzn-s3-demo-bucket-dotnet-lambda-artifacts
+  stages:
+
+    # ---------------------------------------------------------
+    # 1. Source
+    # ---------------------------------------------------------
+    - name: Source
+      actions:
+        - name: GitHub_Source
+          actionTypeId:
+            category: Source
+            owner: AWS
+            provider: CodeStarSourceConnection
+            version: '1'
+          configuration:
+            ConnectionArn: >-
+              arn:aws:codeconnections:eu-west-2:ACCOUNT_ID:connection/CONNECTION_ID
+            FullRepositoryId: adamliversidge-aire/cav 
+            BranchName: master
+            OutputArtifactFormat: CODE_ZIP
+          outputArtifacts:
+            - name: SourceOutput
+
+    # ---------------------------------------------------------
+    # 2. Build & Test the .NET Lambda
+    # ---------------------------------------------------------
+    - name: BuildAndTest
+      actions:
+        - name: DotnetBuildTest
+          actionTypeId:
+            category: Build
+            owner: AWS
+            provider: CodeBuild
+            version: '1'
+          configuration:
+            ProjectName: dotnet-lambda-build-test
+          inputArtifacts:
+            - name: SourceOutput
+          outputArtifacts:
+            - name: BuildOutput
+
+    # ---------------------------------------------------------
+    # 3. Terraform Plan — determine if IaC changes are pending
+    #    CodeBuild project exits 0 (no changes) or 2 (changes),
+    #    surfaced as a variable consumed by the next stage's condition.
+    # ---------------------------------------------------------
+    - name: TerraformCheck
+      actions:
+        - name: TerraformPlan
+          actionTypeId:
+            category: Build
+            owner: AWS
+            provider: CodeBuild
+            version: '1'
+          configuration:
+            ProjectName: dotnet-lambda-terraform-plan
+          inputArtifacts:
+            - name: BuildOutput
+          outputArtifacts:
+            - name: PlanOutput
+          namespace: TerraformPlanVars
+
+    # ---------------------------------------------------------
+    # 4. Terraform Apply — only proceeds if TerraformPlanVars
+    #    reported pending changes (TF_CHANGES_PENDING = "true")
+    # ---------------------------------------------------------
+    - name: DeployInfra
+      actions:
+        - name: TerraformApply
+          actionTypeId:
+            category: Build
+            owner: AWS
+            provider: CodeBuild
+            version: '1'
+          configuration:
+            ProjectName: dotnet-lambda-terraform-apply
+          inputArtifacts:
+            - name: PlanOutput
+          condition:
+            rules:
+              - name: OnlyIfChangesPending
+                ruleTypeId:
+                  category: Rule
+                  owner: AWS
+                  provider: RuleVariableCheck
+                  version: '1'
+                configuration:
+                  Variable: '#{TerraformPlanVars.TF_CHANGES_PENDING}'
+                  Value: 'true'
+                  Operator: EQ
+            result: SKIP
