@@ -37,7 +37,7 @@ public class Function
     /// <param name="context">The ILambdaContext that provides methods for logging and describing the Lambda environment.</param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task<Response> FunctionHandler(CloudWatchEvent<ControlTowerEvent> @event,
+    public async Task FunctionHandler(CloudWatchEvent<ControlTowerEvent> @event,
         ILambdaContext context,
         CancellationToken cancellationToken = default)
     {
@@ -47,20 +47,18 @@ public class Function
 
         if (IsProductionWorkload(account))
         {
-            return await CreateBillingViewForAccount(account!.Value, context, cancellationToken); //not null here
+            await CreateBillingViewForAccount(account!.Value, context, cancellationToken); //not null here
+            return;
         }
-        
+
         //todo: this could be DLT ?
         context.Logger.LogInformation("No account ID found in event, skipping.");
-        return new Response
-        {
-        };
     }
 
-    private static bool IsProductionWorkload(AccountInfo? account) =>
+    internal static bool IsProductionWorkload(AccountInfo? account) =>
         account.HasValue && account!.Value.AccountName.Contains("PROD");
 
-    private async Task<Response> CreateBillingViewForAccount(AccountInfo account,
+    private async Task CreateBillingViewForAccount(AccountInfo account,
         ILambdaContext context,
         CancellationToken cancellationToken)
     {
@@ -68,21 +66,21 @@ public class Function
 
         var billingViewName = $"billing-view-account-{account.AccountName}";
 
-        if (!await CheckIfExistsAsync(billingViewName, cancellationToken))
+        if (await CheckIfExistsAsync(billingViewName, cancellationToken))
         {
-            var accountService = account.AccountName.GetServiceFromAccountName();
-            return await CreateBillingAndShareAsync(billingViewName, accountService, account.AccountId, context, cancellationToken);
+            context.Logger.LogInformation($"Billing view {billingViewName} already exists, skipping.");
+            return;
         }
-
-        context.Logger.LogInformation($"Billing view {billingViewName} already exists, skipping.");
-        return new Response();
+        
+        var accountService = account.AccountName.GetServiceFromAccountName();
+        await CreateBillingAndShareAsync(billingViewName, accountService, account.AccountId, context, cancellationToken);
     }
 
     private async Task<bool> CheckIfExistsAsync(string billingViewName, CancellationToken cancellationToken)
     {
         var response = await _billingClient.ListBillingViewsAsync(new ListBillingViewsRequest
         {
-            Names = [new StringSearch { SearchValue = billingViewName }]
+            Names = [new StringSearch { SearchValue = billingViewName }],
         }, cancellationToken);
 
         return response.BillingViews.Any(x => x.Name == billingViewName);
@@ -110,7 +108,7 @@ public class Function
             .ToList();
     }
 
-    private async Task<Response> CreateBillingAndShareAsync(string billingViewName, string accountService, string accountId,
+    private async Task CreateBillingAndShareAsync(string billingViewName, string accountService, string accountId,
         ILambdaContext context, CancellationToken cancellationToken)
     {
         var linkedAccounts = await GetAccountsAsync(accountService, cancellationToken);
@@ -119,9 +117,9 @@ public class Function
         {
             Name = billingViewName,
             SourceViews = [$"arn:aws:billing::{context.InvokedFunctionArn.Split(':')[4]}:billingview/primary"],
-            DataFilterExpression =
+            DataFilterExpression = new()
             {
-                Dimensions =
+                Dimensions = new()
                 {
                     Key = "LINKED_ACCOUNT",
                     Values = linkedAccounts.ToList()
@@ -131,10 +129,11 @@ public class Function
 
         context.Logger.LogInformation($"Created billing view: {createViewResponse.Arn}");
 
-        return await ShareBillingViewWithAccount(createViewResponse.Arn, accountId, context, cancellationToken);
+        await ShareBillingViewWithAccount(createViewResponse.Arn, accountId, context, cancellationToken);
     }
 
-    private async Task<Response> ShareBillingViewWithAccount(string viewArn, string accountId, ILambdaContext context, CancellationToken cancellationToken)
+    private async Task ShareBillingViewWithAccount(string viewArn, string accountId, ILambdaContext context,
+        CancellationToken cancellationToken)
     {
         context.Logger.LogInformation($"Sharing billing view {viewArn} with account {accountId}");
 
@@ -147,21 +146,13 @@ public class Function
         }, cancellationToken);
 
         context.Logger.LogInformation($"Created RAM share: {shareResponse.ResourceShare.ResourceShareArn}");
-
-        return new Response
-        {
-            // Status = "ok",
-            // AccountId = accountId,
-            // BillingViewArn = viewArn,
-            // ResourceShareArn = shareResponse.ResourceShare.ResourceShareArn
-        };
     }
     
-    private static AccountInfo? GetAccountIdFromEvent(CloudWatchEvent<ControlTowerEvent> @event)
+    internal static AccountInfo? GetAccountIdFromEvent(CloudWatchEvent<ControlTowerEvent> @event)
     {
         var accountDetails = @event.Detail?.ServiceEventDetails?.CreateManagedAccountStatus;
 
-        if (accountDetails is null || accountDetails.State != "SUCCEEDED")
+        if (accountDetails is null || accountDetails.State != Constants.Success)
             return null;
 
         return accountDetails.Account;
