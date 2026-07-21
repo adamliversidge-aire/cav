@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CAV.BillingView", "CAV.Bill
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CAV.BillingView.Tests", "CAV.BillingView.Tests\CAV.BillingView.Tests.csproj", "{831B0D83-4571-400E-A242-A6A155B41FB1}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0F729BE1-F58B-42BE-9EAE-2EAC5039E432}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,5 +77,9 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B99289B5-F3CF-4712-9992-50E791DE6AFE}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{9F87818E-4EEF-4A94-A7C9-36186F1A3F46} = {0F729BE1-F58B-42BE-9EAE-2EAC5039E432}
+		{831B0D83-4571-400E-A242-A6A155B41FB1} = {0F729BE1-F58B-42BE-9EAE-2EAC5039E432}
 	EndGlobalSection
 EndGlobal
