@@ -12,13 +12,9 @@ using CsvHelper;
 
 namespace CAV.AccountUsage;
 
-public class Function(IAmazonIdentityManagementService iamClient, 
+public class Function(IAmazonIdentityManagementService iamClient,
     IAmazonSimpleNotificationService simpleNotificationService)
 {
-    public Function() 
-        : this(new AmazonIdentityManagementServiceClient(),
-            new AmazonSimpleNotificationServiceClient()) { }
-
     public async Task FunctionHandler(EventBridgeEvent<dynamic> input, ILambdaContext context)
     {
         var users = await iamClient.ListUsersAsync();
