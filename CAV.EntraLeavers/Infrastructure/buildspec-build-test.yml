@@ -1,0 +1,46 @@
+version: 0.2
+
+env:
+  variables:
+    DOTNET_VERSION: "10.0"
+
+phases:
+  install:
+    runtime-versions:
+      dotnet: $DOTNET_VERSION
+    commands:
+      - echo "Installing dependencies..."
+      - dotnet restore
+
+  build:
+    commands:
+      - echo "Running lint checks..."
+      - dotnet format --verify-no-changes --severity warn
+
+      - echo "Building solution..."
+      - dotnet build --configuration Release --no-restore
+
+      - echo "Running unit tests..."
+      - dotnet test --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
+
+      - echo "Publishing Lambda package..."
+      - dotnet lambda package --project-location CAV.EntraLeavers --configuration Release --output-package ./publish/function.zip
+      # If you don't use the Amazon.Lambda.Tools CLI, replace the line above with:
+      # dotnet publish -c Release -o ./publish/output
+      # and zip that output directory instead.
+
+  post_build:
+    commands:
+      - echo "Build and test complete."
+
+artifacts:
+  files:
+    - publish/**/*
+    - '**/*'
+  discard-paths: no
+
+reports:
+  dotnet-tests:
+    files:
+      - '**/test-results.trx'
+    file-format: VisualStudioTrx
